@@ -1,4 +1,4 @@
-OpenAI
+openai
 langchain
 pandas
 numpy
