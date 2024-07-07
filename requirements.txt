@@ -1,0 +1,7 @@
+OpenAI
+langchain
+pandas
+numpy
+scikit-learn
+matplotlib
+scipy
