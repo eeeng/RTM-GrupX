@@ -22,3 +22,4 @@ jupyterlab_widgets==3.0.11
 kaggle==1.6.14
 kagglehub==0.2.6
 keras==2.15.0
+tiktoken==0.7.0
