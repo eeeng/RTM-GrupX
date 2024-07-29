@@ -1,135 +1,118 @@
 import os
 import numpy as np
+import mne
+import logging
 import tkinter as tk
 from tkinter import ttk, messagebox
-import mne
-import pandas as pd
-import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from ctgan import CTGAN
 
-class EEGDataHandler:
+# Setup logging
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
+
+class EEGDataLoader:
     def __init__(self, data_path):
         self.data_path = data_path
-        self.raw = None
+        self.raw_data = []
 
     def load_data(self):
         try:
-            if os.path.exists(self.data_path):
-                self.raw = mne.io.read_raw_edf(self.data_path, preload=True)
-                return self.raw
-            else:
-                raise FileNotFoundError(f"File not found: {self.data_path}")
-        except Exception as e:
-            print(f"Error loading data: {e}")
-            return None
+            data_files = []
+            for root, dirs, files in os.walk(self.data_path):
+                for file in files:
+                    if file.endswith('.edf') or file.endswith('.bdf'):
+                        data_files.append(os.path.join(root, file))
+            
+            if not data_files:
+                raise FileNotFoundError("No EDF or BDF files found in the data path.")
 
-    def preprocess_data(self):
-        try:
-            if self.raw:
-                self.raw.filter(1., 40., fir_design='firwin')
-                return self.raw.get_data()
-            else:
-                print("No raw data to preprocess.")
-                return None
-        except Exception as e:
-            print(f"Error during preprocessing: {e}")
-            return None
+            self.raw_data = []
+            for file in data_files:
+                raw = mne.io.read_raw_edf(file, preload=True) if file.endswith('.edf') else mne.io.read_raw_bdf(file, preload=True)
+                self.raw_data.append(raw.get_data())
 
-    def generate_synthetic_data(self, noise_level=0.01):
-        try:
-            if self.raw:
-                data = self.raw.get_data()
-                noise = np.random.randn(*data.shape) * noise_level
-                synthetic_data = data + noise
-                return synthetic_data
-            else:
-                print("No raw data to generate synthetic data from.")
-                return None
+            logger.info("Data loaded successfully.")
         except Exception as e:
-            print(f"Error generating synthetic data: {e}")
-            return None
+            logger.error(f"Error loading data: {e}")
+            raise
 
-    def export_data(self, data, output_path):
+class EEGSyntheticDataGenerator:
+    def __init__(self, raw_data):
+        self.raw_data = raw_data
+        self.synthesizer = CTGAN()
+
+    def generate_synthetic_data(self, num_samples):
         try:
-            df = pd.DataFrame(data.T)
-            df.to_csv(output_path, index=False)
-            print(f"Data exported to {output_path}")
+            # Flatten the list of arrays and transpose to match (samples, features) shape
+            data = np.hstack(self.raw_data).T
+            self.synthesizer.fit(data)
+            synthetic_data = self.synthesizer.sample(num_samples)
+            logger.info("Synthetic data generated successfully.")
+            return synthetic_data
         except Exception as e:
-            print(f"Error exporting data: {e}")
+            logger.error(f"Error generating synthetic data: {e}")
+            return None
 
 class Application(tk.Tk):
     def __init__(self):
         super().__init__()
 
-        self.title("EEG Data Generator")
+        self.title("EEG Synthetic Data Generator")
         self.geometry("800x600")
 
-        self.data_handler = EEGDataHandler(r"D:\EEG\PythonApplication1\ds004196\sub-001\eeg\sub-001_task-rest_eeg.edf")
+        self.data_loader = EEGDataLoader(r"D:\EEG\PythonApplication1\EEGData")
+        self.data_loader.load_data()
+
+        self.synthetic_data_generator = EEGSyntheticDataGenerator(self.data_loader.raw_data)
         self.create_widgets()
 
     def create_widgets(self):
         frame = ttk.Frame(self)
         frame.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)
 
-        ttk.Label(frame, text="Data Path:").grid(row=0, column=0, sticky=tk.W, pady=5)
-        self.data_path_entry = ttk.Entry(frame, width=50)
-        self.data_path_entry.grid(row=0, column=1, sticky=tk.W, pady=5)
-        self.data_path_entry.insert(0, self.data_handler.data_path)
+        ttk.Label(frame, text="Number of Samples:").grid(row=0, column=0, sticky=tk.W, pady=5)
+        self.num_samples_entry = ttk.Entry(frame)
+        self.num_samples_entry.grid(row=0, column=1, sticky=tk.W, pady=5)
+        self.num_samples_entry.insert(0, "100")
 
-        load_button = ttk.Button(frame, text="Load Data", command=self.load_data)
-        load_button.grid(row=1, column=0, columnspan=2, pady=5)
+        generate_button = ttk.Button(frame, text="Generate Data", command=self.generate_and_display_data)
+        generate_button.grid(row=1, column=0, columnspan=2, pady=10)
 
-        generate_button = ttk.Button(frame, text="Generate Synthetic Data", command=self.generate_synthetic_data)
-        generate_button.grid(row=2, column=0, columnspan=2, pady=5)
-
-        export_button = ttk.Button(frame, text="Export Data", command=self.export_data)
-        export_button.grid(row=3, column=0, columnspan=2, pady=5)
-
-        self.fig, self.ax = plt.subplots(figsize=(10, 6))
+        self.fig = Figure(figsize=(10, 6))
+        self.ax = self.fig.add_subplot(111)
         self.canvas = FigureCanvasTkAgg(self.fig, master=frame)
         self.canvas_widget = self.canvas.get_tk_widget()
-        self.canvas_widget.grid(row=4, column=0, columnspan=2, sticky=tk.NSEW)
+        self.canvas_widget.grid(row=2, column=0, columnspan=2, sticky=tk.NSEW)
 
         frame.columnconfigure(1, weight=1)
-        frame.rowconfigure(4, weight=1)
+        frame.rowconfigure(2, weight=1)
 
-    def load_data(self):
-        self.data_handler.data_path = self.data_path_entry.get()
-        self.raw = self.data_handler.load_data()
-        if self.raw:
-            messagebox.showinfo("Success", "Data loaded successfully.")
-        else:
-            messagebox.showerror("Error", "Failed to load data.")
+    def generate_and_display_data(self):
+        try:
+            num_samples = int(self.num_samples_entry.get())
+            synthetic_data = self.synthetic_data_generator.generate_synthetic_data(num_samples)
 
-    def generate_synthetic_data(self):
-        synthetic_data = self.data_handler.generate_synthetic_data()
-        if synthetic_data is not None:
-            self.display_data(synthetic_data)
-            messagebox.showinfo("Success", "Synthetic data generated.")
-        else:
-            messagebox.showerror("Error", "Failed to generate synthetic data.")
+            if synthetic_data is not None:
+                self.ax.clear()
+                for i, sample in enumerate(synthetic_data):
+                    time = np.arange(len(sample))
+                    self.ax.plot(time, sample, label=f'Sample {i+1}')
 
-    def export_data(self):
-        output_path = "D:/EEG/PythonApplication1/synthetic_data.csv"
-        data = self.data_handler.generate_synthetic_data()
-        if data is not None:
-            self.data_handler.export_data(data, output_path)
-            messagebox.showinfo("Success", f"Data exported to {output_path}.")
-        else:
-            messagebox.showerror("Error", "No data to export.")
+                self.ax.set_xlabel('Time')
+                self.ax.set_ylabel('Amplitude')
+                self.ax.set_title('Synthetic EEG Data')
+                self.ax.legend(loc='upper right')
+                self.ax.grid(True)
+                self.canvas.draw()
 
-    def display_data(self, data):
-        self.ax.clear()
-        for i, channel_data in enumerate(data):
-            time = np.arange(channel_data.size) / self.raw.info['sfreq']
-            self.ax.plot(time, channel_data + i * 10, label=f'Channel {i+1}')
-
-        self.ax.set_xlabel('Time (s)')
-        self.ax.set_ylabel('Amplitude (uV)')
-        self.ax.set_title('Synthetic EEG Data')
-        self.ax.legend(loc='upper right', fontsize='small')
-        self.ax.grid(True)
-        self.canvas.draw()
+                logger.info("Displayed synthetic data.")
+            else:
+                messagebox.showerror("Error", "Failed to generate synthetic data.")
+        except Exception as e:
+            logger.error(f"Error in generating data: {e}")
+            messagebox.showerror("Error", "An error occurred while generating data.")
 
 def main():
     app = Application()
