@@ -1,6 +1,6 @@
-# 2024 Teknofest NLP
+# GrupX Project
 
-## Faydalanılan Data Set
+## Stack'ler Repo
 
 Kaggle: [Complete EEG Dataset](https://www.kaggle.com/datasets/amananandrai/complete-eeg-dataset)
 
